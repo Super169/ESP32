@@ -58,14 +58,15 @@ public:
 
    using Print::write;
 
+   // read from pin based on interrupt
+   void rxRead();
+
+
 private:
    bool isValidGPIOpin(int pin);
 
    // Disable or enable interrupts on the rx pin
    void enableRx(bool on);
-
-   // read from pin based on interrupt
-   void rxRead();
 
    // Member variables
    int m_rxPin, m_txPin, m_txEnablePin;

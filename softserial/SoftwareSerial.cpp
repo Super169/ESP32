@@ -209,57 +209,44 @@ int SoftwareSerial::read() {
 /* return the number of bytes available in RX-buffer */
 int SoftwareSerial::available() {
    if (!m_rxValid) return 0;
-/*
-DPRINT("avail : M_in  / m_out  ");
-DPRINT(m_inPos);
-DPRINT(" / ");
-DPRINTLN(m_outPos);
-*/
+
    int avail = m_inPos - m_outPos;
    if (avail < 0) avail += m_buffSize;
 
    return avail;
 }
 
-#define WAIT { start = ESP.getCycleCount(); while (ESP.getCycleCount() - start < m_bitTime) if (m_intTxEnabled) optimistic_yield(1); }
+ 
+#define WAIT { while (ESP.getCycleCount()-start < wait); wait += m_bitTime; if (m_intTxEnabled) optimistic_yield(1); }
 
 size_t SoftwareSerial::write(uint8_t b) {
-   unsigned long start;
-
    if (!m_txValid) return 0;
 
    if (m_invert) b = ~b;
-
-   if (m_txEnableValid) digitalWrite(m_txEnablePin, HIGH);
-
+   
    // Disable interrupts in order to get a clean transmit
    portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-   if (m_intTxEnabled)  portENTER_CRITICAL(&mux);
+   portENTER_CRITICAL(&mux);
 
-   // make sure line is high to detect start
+   if (m_txEnableValid) digitalWrite(m_txEnablePin, HIGH);
+   unsigned long wait = m_bitTime;
    digitalWrite(m_txPin, HIGH);
-   WAIT;
-
-   // Start bit;
+   unsigned long start = ESP.getCycleCount();
+    // Start bit;
    digitalWrite(m_txPin, LOW);
    WAIT;
-
    for (int i = 0; i < 8; i++) {
-
-    digitalWrite(m_txPin, (b & 1) ? HIGH : LOW);
-    WAIT;
-
-    b >>= 1;
+     digitalWrite(m_txPin, (b & 1) ? HIGH : LOW);
+     WAIT;
+     b >>= 1;
    }
-
    // Stop bit
    digitalWrite(m_txPin, HIGH);
    WAIT;
+   if (m_txEnableValid) digitalWrite(m_txEnablePin, LOW);
 
    // re-enable interrupts
-   if (m_intTxEnabled) portEXIT_CRITICAL(&mux);
-
-   if (m_txEnableValid) digitalWrite(m_txEnablePin, LOW);
+   portEXIT_CRITICAL(&mux);
 
    return 1;
 }
@@ -286,10 +273,9 @@ int SoftwareSerial::peek() {
 
 void IRAM_ATTR SoftwareSerial::rxRead() {
 
-   // Advance the starting point for the samples
-   // NO need to compensate for the initial delay which occurs before
-   // the interrupt is delivered. The delay is 3.5us (measured). neglectable !
-   unsigned long wait = m_bitTime + m_bitTime/2.5;
+   // Advance the starting point for the samples but compensate for the
+   // initial delay which occurs before the interrupt is delivered
+   unsigned long wait = m_bitTime + m_bitTime/3 - 500;
 
    // this requires changes (adding IRAM_ATTR) in  ESP.cpp
    // line 103 uint32_t IRAM_ATTR EspClass::getCycleCount()
@@ -302,11 +288,9 @@ void IRAM_ATTR SoftwareSerial::rxRead() {
 
    for (int i = 0; i < 8; i++) {
      WAITR;
-//digitalWrite(m_txEnablePin, HIGH);    // debug only
      rec >>= 1;
      if (digitalRead(m_rxPin))
        rec |= 0x80;
-//digitalWrite(m_txEnablePin, LOW);     // debug only
    }
    if (m_invert) rec = ~rec;
 
@@ -315,7 +299,7 @@ void IRAM_ATTR SoftwareSerial::rxRead() {
     * code below to execute & after the interrupt routine (yield()) to
     * be able to trigger on-time for the next byte.
     * The STOP bit is high anyway and who needs it ?? */
-   // WAITR;
+   // WAIT;
    portEXIT_CRITICAL(&mux);
 
    // Store the received value in the buffer unless we have an overflow
